@@ -5,26 +5,41 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Point;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EmptyStackException;
 import java.util.List;
 import java.util.Stack;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JLayeredPane;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 
-/* Known bugs:
+/* 
+Current (v. 0.20)
+Known bugs:
  * 
  * -Default onClickPressed flash animation still present.
- * 
- * Future features/tests:
+ * -Empty stack shows a phantom card when cards are moved via selection
+(but not when moved by drag and drop)
+ 
+* Future features/tests:
  * 
  -Add deal button so you can replay if you have no moves left
      -(Don't auto-exit upon win.)
@@ -35,14 +50,17 @@ import javax.swing.SwingUtilities;
  * -Add testing.
  * -Better graphics
  * -Card moving animation
-   -Check selection visibility on a PC
- * -Make buttons moveable. This might require a redesign. Hence do it first.
- * 
- * Fix .equals in Card, I threw it together.
+   -Selection is pale grey on a PC -- should be green.
+ * -Check .equals in Card, I threw it together.
+   -Review JavaDocs
  * 
  * Possible future directions:
  * AI to solve all games (or declare them unwinnable)
- * 
+ * Separate logging output for verbosity
+
+Finished: (v. 0.15)
+-Implemented drag and drop
+
  */
 public class Game
 {
@@ -98,6 +116,12 @@ public class Game
       private List<List<CardButton>> playStacksButtons;
       private CardStack currentlySelected;
       private boolean somethingSelected;
+      /**
+       * Used only by NiftyTransferHandler so it knows the source stack.
+       * Set by DragClickListener.
+       * The equivalent of currentlySelectd
+       */
+      private CardStack stackBeingDragged;
       private CardButton currentlySelectedButton;
       private JButton deal = new JButton();
 //Not implemented
@@ -107,8 +131,9 @@ public class Game
       private JPanel aceStackArea; //belongs in freeAceArea
       private JPanel freeAceArea;
       private JLayeredPane playStackArea;
-      private ClickListener[] playStackListener, freecellListener, aceStackListener;
-
+      private DragClickListener[] playStackListener, freecellListener, aceStackListener;
+      private MoveAids myMoveAids;
+       
       void deal()
       {
          Shoe aShoe = new Shoe(1);
@@ -122,9 +147,7 @@ public class Game
             {
                aCard = aShoe.drawRandom();
                ((PlayStack) (myPlayStacks[i])).forcePush(aCard);
-
                addButtonToThisPlayStack(aCard, i);
-
                if (aShoe.numberOfCards() == 0)
                {
                   empty = true;
@@ -142,6 +165,7 @@ public class Game
        * Takes a Card and index of a play stack and creates a button
        * on top of that playstack.
        *
+       * I'm adding a bunch of code to this, it's now untested.
        * @param aCard
        * @param playStackIndex
        */
@@ -153,9 +177,11 @@ public class Game
                  playStackIndex).size();
          //setToTopOfPlayStack adds one element to this array
 
-         scratch = new CardButton(RetrieveIcon.getIcon(aCard), aCard);
-         scratch.addActionListener(playStackListener[playStackIndex]);
+         scratch = new CardButton(RetrieveIcon.getIcon(aCard), aCard, myPlayStacks[playStackIndex]);
+         scratch.addMouseListener(playStackListener[playStackIndex]);
+                  
          setButtonSettings(scratch, aCard);
+         //If the Card knows its stack, then...why did I do all that?
          setToTopOfPlayStack(scratch, playStackIndex); //Adds the button to the playstack
          playStackArea.add(playStacksButtons.get(playStackIndex).get(
                  indexAddedElement), new Integer(indexAddedElement));
@@ -190,13 +216,14 @@ public class Game
       private void initialize()
       {
          int i;
+         myMoveAids = new MoveAids();
          myAceStacks = new AceStack[NUMBER_ACE_STACKS];
          aceStacksButtons = new CardButton[NUMBER_ACE_STACKS];
-         aceStackListener = new ClickListener[NUMBER_ACE_STACKS];
+         aceStackListener = new DragClickListener[NUMBER_ACE_STACKS];
 
          myFreecells = new Freecell[NUMBER_ACE_STACKS];
          freecellsButtons = new CardButton[NUMBER_ACE_STACKS];
-         freecellListener = new ClickListener[NUMBER_ACE_STACKS];
+         freecellListener = new DragClickListener[NUMBER_ACE_STACKS];
 
          myPlayStacks = new PlayStack[NUMBER_PLAY_STACKS];
 
@@ -207,19 +234,19 @@ public class Game
             playStacksButtons.add(new ArrayList<CardButton>());
          }
 
-         playStackListener = new ClickListener[NUMBER_PLAY_STACKS];
+         playStackListener = new DragClickListener[NUMBER_PLAY_STACKS];
 
          for (i = 0; i < myAceStacks.length; i++)
          {
             myAceStacks[i] = new AceStack();
-            aceStackListener[i] = new ClickListener(myAceStacks[i]);
+            aceStackListener[i] = new DragClickListener(myAceStacks[i]);
             myFreecells[i] = new Freecell();
-            freecellListener[i] = new ClickListener(myFreecells[i]);
+            freecellListener[i] = new DragClickListener(myFreecells[i]);
          }
          for (i = 0; i < myPlayStacks.length; i++)
          {
             myPlayStacks[i] = new PlayStack();
-            playStackListener[i] = new ClickListener(myPlayStacks[i]);
+            playStackListener[i] = new DragClickListener(myPlayStacks[i]);
          }
 
          somethingSelected = false;
@@ -235,20 +262,37 @@ public class Game
        *
        * @param aButton
        */
-      private void standardButtonSettings(JButton aButton)
+      private void standardButtonSettings(CardButton aButton)
       {
          //Assumes you've already said aButton = new JButton(someIcon);
-         aButton.setBorderPainted(false);
+         
+         aButton.setFocusable(false); //Needed for drag/drop to work.
+         //I might need to declare this before the other stuff, too.
+         
          aButton.setBorder(null);
          //aButton.setBackground(Color.WHITE); Should inherit the background of the pane.
          //? but doesn't hurt
 
+         /*Can't be used on a JLabel:
          aButton.setFocusPainted(false);  //Bingo! This disables the stupid box.
+         aButton.setBorderPainted(false);
+         //
+         */
          aButton.setOpaque(true);
+         CardStack myStack = aButton.getMyCardStack();
+         NiftyTransferHandler myHandler = new NiftyTransferHandler("icon", myStack);
+         
+         
+         ImageIcon dragImage = RetrieveIcon.getIcon(RetrieveIcon.JOKER);
+         
+       myHandler.setDragImage(dragImage.getImage());
+         
+         aButton.setTransferHandler(myHandler);
+
 
       }
 
-      private void setButtonSettings(JButton aButton, Card aCard)
+      private void setButtonSettings(CardButton aButton, Card aCard)
       {
          standardButtonSettings(aButton);
 
@@ -265,11 +309,12 @@ public class Game
        * class.
        *
        */
-      private void setButtonSettings(JButton aButton, int cardcode)
+      private void setButtonSettings(CardButton aButton, int cardcode)
       {
          standardButtonSettings(aButton);
          aButton.setSelectedIcon(RetrieveIcon.getSelectedImage(
                  cardcode));
+         
       }
 
       /**
@@ -278,7 +323,7 @@ public class Game
        *
        * @param aButton
        */
-      private void setButtonSettings(JButton aButton)
+      private void setButtonSettings(CardButton aButton)
       {
          standardButtonSettings(aButton);
       }
@@ -310,18 +355,18 @@ public class Game
          for (i = 0; i < NUMBER_ACE_STACKS; i++)
          {
             freecellsButtons[i] = new CardButton(RetrieveIcon.getIcon(
-                    RetrieveIcon.EMPTY_SPACE));
+                    RetrieveIcon.EMPTY_SPACE), myFreecells[i]);
             assert RetrieveIcon.getIcon(RetrieveIcon.EMPTY_SPACE) != null;
-            freecellsButtons[i].addActionListener(freecellListener[i]);
+            freecellsButtons[i].addMouseListener(freecellListener[i]);
             setButtonSettings(freecellsButtons[i],
                               RetrieveIcon.EMPTY_SPACE);
             freecellArea.add(freecellsButtons[i]);
 
 
             aceStacksButtons[i] = new CardButton(RetrieveIcon.getIcon(
-                    RetrieveIcon.JOKER));
+                    RetrieveIcon.JOKER), myAceStacks[i]);
             assert RetrieveIcon.getIcon(RetrieveIcon.JOKER) != null;
-            aceStacksButtons[i].addActionListener(aceStackListener[i]);
+            aceStacksButtons[i].addMouseListener(aceStackListener[i]);
             setButtonSettings(aceStacksButtons[i], RetrieveIcon.JOKER);
             aceStackArea.add(aceStacksButtons[i]);
          }
@@ -399,7 +444,12 @@ public class Game
          }
 
       }
-
+/**
+ * 
+ * Removes the button specified by the Card from the playstacks area.
+ * Should not be used on the last button in a stack.
+ * @param aCard 
+ */
       void removeFromPlayStackButtons(Card aCard)
       {
          final int index = getIndexOfPlayStackButtons(aCard);
@@ -433,309 +483,13 @@ public class Game
 
          }
          return -100000;
+         
+        
          //I am doing this so I can : (A) remove the old card from the right arraylist of cardbuttons
          //
          // (B) Add the card to the right arraylist of buttons.
       }
 
-      private class ClickListener implements ActionListener
-      {
-         CardStack myStack; //all click listeners point to a stack
-         //They can use the JFrame's objects, so they know what, if anything,
-         //is selected
-         //I only need 1 clicklistener object for each stack -- I can reuse the
-         //same one for multiple cards in the stack.
-
-         /**
-          * This is clunkier than it should be because of
-          * architechtural failings. I need to link CardStacks with
-          * the arrays of JButtons they refer to. That way I wouldn't
-          * have to look stuff up and use ad hoc solutions.
-          *
-          * @param from
-          * @param to
-          */
-         private void makeMove(CardStack from, CardStack to,
-                               CardButton myTop)
-         {
-            final boolean toWasNotOccupied;
-            final Card lastCardInToStack;
-            if (to.isOccupied())
-            {
-               toWasNotOccupied = false;
-               lastCardInToStack = to.peek();
-            }
-            else
-            {
-               toWasNotOccupied = true;
-               lastCardInToStack = null;
-            }
-            Card movedCard = from.pop();
-            to.push(movedCard);
-            if (DEBUGGING)
-            {
-               System.out.println(
-                       "I am trying to a move a " + movedCard);
-            }
-            //UPDATE FROM STACK
-            final boolean fromIsOccupied = from.isOccupied();
-
-            //REMOVE CARD
-            if (!fromIsOccupied)
-            {
-               //The stack you're moving from has no cards left in it. Change CardButton.
-               currentlySelectedButton.setIcon(from.getDefaultImage());
-               currentlySelectedButton.setBorder(null);
-               currentlySelectedButton.setNoCard();
-               //Chains up to the layout when I call validate.
-
-            }
-            else
-            {
-               //There are cards left in the current stack. It must be a PlayStack
-               //must also remove from PlayStackButtons array.
-               currentlySelectedButton.setVisible(false); //Bingo! This works!
-               //Must remove from panel that it belongs to, not whole JFram:
-               playStackArea.remove(currentlySelectedButton);
-               removeFromPlayStackButtons(movedCard);
-
-            }
-            //UPDATE TO STACK
-            if ((toWasNotOccupied) || to.isValidRemove() == false)
-            {//The second part only is true if the stack is currently empty OR it's an ace stack.
-               if (DEBUGGING)
-               {
-                  System.out.println(
-                          "The stack I am moving to has nothing in it.");
-               }
-               
-              
-               
-               //setButtonSettings (myTop, movedCard); -- does NOT do any of these:
-                myTop.setCard(movedCard);
-               myTop.setIcon(RetrieveIcon.getIcon(movedCard)); 
-               myTop.setSelectedIcon(RetrieveIcon.getSelectedImage(movedCard));
-               myTop.setBorder(null); 
-               
-               //change icon only, don't need to add a button.
-            }
-            else
-            { //The to stack has been occupied previously. It must be a playstack.
-               //Add one button to the last card. Arg math.
-
-               final int playStackIndex = getIndexOfPlayStackButtons(
-                       lastCardInToStack);
-               if (DEBUGGING)
-               {
-                  System.out.println(
-                          "Adding a card to a playStack whose last card is "
-                          + lastCardInToStack + ", and whose index is " + playStackIndex);
-               }
-               addButtonToThisPlayStack(movedCard, playStackIndex);
-            }
-
-         }
-
-         /**
-          * This implementation sucks, and CardButton is a ghetto fix.
-          * Alas. This should get fixed. Maybe the CardStacks always
-          * contain a reference to their top and bottom buttons.
-          *
-          * @param topCard
-          * @param mySource
-          * @throws IllegalStateException if topCard is not actually
-          * on the top of any playstack
-          * @return CardButton at the top of the stack
-          */
-         public CardButton getTopButton(final Card topCard,
-                                        final CardButton mySource)
-         {
-
-            Card clickedCard = mySource.getCard();
-            if (topCard.equals(clickedCard))
-            {
-               return mySource;
-            }
-
-//Otherwise...you clicked on something not at the top. Only possible in the playStackButtons.
-            int size;
-            Card otherTopCard;
-            CardButton otherTopButton;
-            for (int i = 0; i < playStacksButtons.size(); i++)
-            {
-               size = playStacksButtons.get(i).size();
-               otherTopButton = playStacksButtons.get(i).get(size - 1);
-               if (otherTopButton.isCard())
-               {
-                  otherTopCard = otherTopButton.getCard();
-                  if (otherTopCard.equals(topCard))
-                  {
-                     return playStacksButtons.get(i).get(size - 1);
-                  }
-               }
-               /* catch (NullPointerException e)
-                { System.err.println("My CardButton source is associated with card " + clickedCard + ".");
-                System.err.println("I was looking at the following stack of cards: " + "");
-                e.printStackTrace();
-                } */
-
-            }
-
-//It should be impossible to get here.
-            throw new IllegalStateException(
-                    "Top button not found that corresponds to " + topCard);
-         }
-
-         /**
-          * This can be expanded to move aces up automatically, move
-          * other cards up automatically, or anything else.
-          *
-          */
-         void postMoveChecks()
-         {
-            boolean gameFinished = true;
-            for (int i = 0; (gameFinished) && (i < myAceStacks.length); i++)
-            {
-               if (!myAceStacks[i].isOccupied())
-               {
-                  gameFinished = false;
-               }
-               else if (myAceStacks[i].peek().getCardValue() != CardValue.KING)
-               {
-                  gameFinished = false;
-               }
-            }
-
-            if (gameFinished)
-            {
-               JOptionPane.showMessageDialog(null,
-                                             "Congratulations, you win! Have a nice day.",
-                                             "Yay!",
-                                             JOptionPane.PLAIN_MESSAGE);
-               System.exit(0);
-            }
-         }
-
-         /**
-          *
-          * @param aStack NOT CLONED so be careful.
-          */
-         ClickListener(CardStack aStack)
-         {
-            super();
-            myStack = aStack; //Note lack of cloning
-         }
-
-         private void deselect()
-         {
-            currentlySelectedButton.setBackground(null);
-            currentlySelectedButton.setSelected(false);
-
-            somethingSelected = false;
-            currentlySelected = null;
-            currentlySelectedButton = null;
-            if (DEBUGGING)
-            {
-               System.out.println(
-                       "Stack that has been selected has been deselected.");
-            }
-         }
-
-         @Override
-         public void actionPerformed(ActionEvent event)
-         {
-            CardButton mySource = (CardButton) event.getSource();
-
-            if (DEBUGGING)
-            {
-               if (myStack.isOccupied())
-               {
-                  if (mySource.isCard())
-                  {
-                     System.out.println(
-                             "This card has been clicked on: " + mySource.getCard());
-                  }
-                  else
-                  {
-                     System.out.println(
-                             "I have clicked on an empty space.");
-                  }
-               }
-               else if (!somethingSelected)
-               { //If the clicked-on stack is empty and nothing else is selected, do nothing.
-                  System.out.println("This stack is empty.");
-                  return;
-               }
-            }
-            if (!somethingSelected)
-            {
-               //Is it legal to select this stack? If not, do nothing. If yes, select it.
-               //In either case, return.
-               if (myStack.isSelectable())
-               {
-                  //set as selected the TOP BUTTON in mySource
-                  if (DEBUGGING)
-                  {
-                     System.out.println(
-                             "My stack is selectable, and its top card is " + myStack.peek());
-                  }
-
-                  CardButton theTop = getTopButton(myStack.peek(),
-                                                   mySource);
-                  theTop.setSelected(true);
-                  theTop.setBackground(niftyColor);
-                  //no effect on JLayedPane. Creates a background on a JPanel though.
-
-                  //theTop.setOpaque(true);
-
-                  //doesn't work here.
-                  somethingSelected = true;
-                  currentlySelected = myStack;
-                  currentlySelectedButton = theTop; // 
-                  validate();
-               }
-               return;
-            }
-
-            //Something has been previously selected.
-
-            if (myStack == currentlySelected)
-            { //Deselect and return
-               deselect();
-               validate();
-               return;
-            }
-
-
-            //At this point, I know that something else has been previously selected.
-            //So test if the move is valid, then make it, or deselect if not legal.
-            if (currentlySelected.isValidRemove() && myStack.isValidAdd(
-                    currentlySelected.peek()))
-            {
-               CardButton myTop;
-               if (!mySource.isCard())
-               {
-                  myTop = mySource;
-               }
-               else
-               //Can't peek on an empty stack.
-               {
-                  myTop = getTopButton(myStack.peek(), mySource);
-               }
-               makeMove(currentlySelected, myStack, myTop);
-               deselect();
-               validate();
-               postMoveChecks();
-               return;
-            }
-
-            deselect();
-            validate();
-         }
-
-      }
-
-   }
 
    static public class Freecell implements CardStack
    {
@@ -1077,29 +831,711 @@ public class Game
    }
 
    
-   static private class CardButton extends JButton
+   
+   class DragClickListener extends MouseAdapter {
+
+CardStack myStack;//I'll probably need this.
+
+DragClickListener(CardStack myStack)
+{
+  super();
+  this.myStack = myStack;
+}
+        
+  private CardButton getCB(MouseEvent e)
+  {
+      CardButton mySource = null;
+            if (e.getSource() instanceof CardButton)
+              mySource = (CardButton) e.getSource();
+            else {
+                System.out.println("Class DragClickListener associated with something"
+                         + "that's not a CardButton.");
+             if (DEBUGGING)
+                 throw new RuntimeException();
+             else return null; //Silent error
+            }
+            //Or throw a checked class cast exception
+      return mySource;
+  }
+/**
+ * Well I'll be, I do get here sometimes.
+ * 
+ * @param e 
+ */
+        @Override
+        public void mouseClicked(MouseEvent e)
+        {
+            CardButton mySource = getCB(e);
+            if (DEBUGGING)
+            {    System.out.println("mouseClicked: on ");
+                    if (mySource.isCard())
+                     System.out.print(mySource.getCard());
+                    else 
+                        System.out.print (" an empty space.");
+            System.out.println();
+            }
+        myMoveAids.singleClickOn(mySource, myStack);
+        }
+        
+        /**
+         * This seems to kill mouseClicked.
+         * 
+         * @param e 
+         */
+        @Override
+        public void mousePressed(MouseEvent e)
+        {
+            //Note -- is this function continuously activated??
+            
+            CardButton mySource = getCB(e);
+            
+            TransferHandler handler = mySource.getTransferHandler();
+             if (mySource.isCard())
+            System.out.println("DragClickListener.mousepressed: moving " + mySource.getCard());
+             else 
+                 System.out.println("DragClickListener.mousepressed: On a Freecell or Acestack.");
+            
+            if (mySource == null)
+                throw new NullPointerException("mySource is null");
+            if (e == null)
+                throw new NullPointerException("E is null");
+            if (handler == null)
+                throw new NullPointerException("Handler is null");
+
+//Don't drag if something's already been selected
+            
+if (somethingSelected)
+{
+    if (DEBUGGING)
+        System.out.println("DCL.mousePressed:I'm pressing on a stack when something"
+                + "has previously beeen selected.");
+//myMoveAids.singleClickOn(mySource, myStack);
+    
+//Something has already been selected
+//interpret as a move and return -- theoretically handled by mouseClicked
+    //HOWEVER, if there is a tiny drag, it will be handled below.
+    //I haven't taken care of that case yet.s
+return;
+}
+
+//Don't export if not selectable 
+
+       if (myStack.isSelectable()) //Doesn't actually select it
+       { 
+        stackBeingDragged = myStack; //except when do I unselect it? Do I need to 
+        //Note that if I do not press and hold, or move the mouse, it doesn't register as
+        //drag.
+           handler.exportAsDrag(mySource, e, TransferHandler.COPY);
+       }
+       else
+       {
+           //OK. You can't select it. But it might be a valid move if you're just clicking on it.
+          
+       }
+        }
+        
+}
+
+
+ class MoveAids {
+
+         void singleClickOn(CardButton mySource, CardStack myStack)
+         {
+
+            if (DEBUGGING)
+            {
+               if (myStack.isOccupied())
+               {
+                  if (mySource.isCard())
+                  {
+                     System.out.println(
+                             "singleClickOn:This card has been clicked on: " + 
+                      mySource.getCard());
+                  }
+                  else
+                  {
+                     System.out.println(
+                             "singleClickOn: I have clicked on an empty space.");
+                  }
+               }
+               else if (!somethingSelected)
+               { //If the clicked-on stack is empty and nothing else is 
+//selected, do nothing.
+                  System.out.println("singleClickOn: This stack is empty.");
+                  return;
+               }
+            }
+            if (!somethingSelected)
+            {
+               myMoveAids.attemptSelection(myStack, mySource);
+               return;
+            }
+
+            //Something has been previously selected.
+
+            if (myStack == currentlySelected)
+            { //Deselect and return
+               deselect();
+               
+               return;
+            }
+
+
+   //At this point, I know that something else has been previously selected.
+//So test if the move is valid, then make it, or deselect if not legal.
+            myMoveAids.doMoveIfPossible(mySource, myStack, currentlySelected, currentlySelectedButton);
+
+         }
+
+   boolean doMoveIfPossible(CardButton myTarget, CardStack targetStack, CardStack sourceStack, CardButton fromButton)
+       {   if (DEBUGGING)
+       {
+           System.out.println("\ndoMoveIfPossible: trying to move to a ");
+           if (myTarget.isCard())
+              System.out.print(myTarget.getCard() );
+           else System.out.print(" space that is not a card.");
+                   
+       }
+            if (sourceStack.isValidRemove() && targetStack.isValidAdd(
+                    sourceStack.peek()))
+            {  if (DEBUGGING)
+                System.out.println("doMoveIfPossible: The move was judged valid.");
+               CardButton myTop;
+               if (!myTarget.isCard())
+               {
+                  myTop = myTarget;
+               }
+               else
+               //Can't peek on an empty stack.
+               {
+                  myTop = getTopButton(targetStack.peek(), myTarget);
+               }
+               //I need the from button
+               
+               makeMove(sourceStack, targetStack, myTop, fromButton);
+               deselect();
+               
+               postMoveChecks();
+               return true;
+            }
+
+            deselect();
+            
+            return false;
+      }
+
+
+         /**
+          * This implementation sucks, and CardButton is a ghetto fix.
+          * Alas. This should get fixed. Maybe the CardStacks always
+          * contain a reference to their top and bottom buttons.
+          *
+          * @param topCard
+          * @param mySource
+          * @throws IllegalStateException if topCard is not actually
+          * on the top of any playstack
+          * @return CardButton at the top of the stack
+          */
+         public CardButton getTopButton(final Card topCard,
+                                        final CardButton mySource)
+         {
+
+            Card clickedCard = mySource.getCard();
+            if (topCard.equals(clickedCard))
+            {
+               return mySource;
+            }
+
+//Otherwise...you clicked on something not at the top. Only possible in the 
+//playStackButtons.
+            int size;
+            Card otherTopCard;
+            CardButton otherTopButton;
+            for (int i = 0; i < playStacksButtons.size(); i++)
+            {
+               size = playStacksButtons.get(i).size();
+               otherTopButton = playStacksButtons.get(i).get(size - 1);
+               if (otherTopButton.isCard())
+               {
+                  otherTopCard = otherTopButton.getCard();
+                  if (otherTopCard.equals(topCard))
+                  {
+                     return playStacksButtons.get(i).get(size - 1);
+                  }
+               }
+               /* catch (NullPointerException e)
+                { System.err.println("My CardButton source is associated with 
+card " + clickedCard + ".");
+                System.err.println("I was looking at the following stack of 
+cards: " + "");
+                e.printStackTrace();
+                } */
+
+            }
+
+//It should be impossible to get here.
+            throw new IllegalStateException(
+                    "Top button not found that corresponds to " + topCard);
+         }
+
+
+void deselect()
+         {
+            currentlySelectedButton.setBackground(null);
+            currentlySelectedButton.setSelected(false);
+
+            somethingSelected = false;
+            currentlySelected = null;
+            currentlySelectedButton = null;
+            if (DEBUGGING)
+            {
+               System.out.println(
+                       "deselect: Stack that has been selected has been deselected.");
+            }
+            validate();
+         }
+
+         /**
+          * This can be expanded to move aces up automatically, move
+          * other cards up automatically, or anything else.
+          *
+          */
+         void postMoveChecks()
+         {
+            boolean gameFinished = true;
+            for (int i = 0; (gameFinished) && (i < myAceStacks.length); i++)
+            {
+               if (!myAceStacks[i].isOccupied())
+               {
+                  gameFinished = false;
+               }
+               else if (myAceStacks[i].peek().getCardValue() != CardValue.KING)
+               {
+                  gameFinished = false;
+               }
+            }
+
+            if (gameFinished)
+            {
+               JOptionPane.showMessageDialog(null,
+                    "Congratulations, you win! Have a nice day.",
+                                             "Yay!",
+                                             JOptionPane.PLAIN_MESSAGE);
+               System.exit(0);
+            }
+         }
+
+
+
+
+void attemptSelection(CardStack myStack, CardButton mySource)
+{
+               //Is it legal to select this stack? If not, do nothing. If yes, 
+// select it.
+               //In either case, return.
+               if (myStack.isSelectable())
+               {
+                  //set as selected the TOP BUTTON in mySource
+                  if (DEBUGGING)
+                  {
+                     System.out.println(
+             "attemptSelection: selecting " + myStack.peek());
+                  }
+
+                  CardButton theTop = getTopButton(myStack.peek(),
+                                                   mySource);
+                  theTop.setSelected(true);
+                  theTop.setBackground(niftyColor);
+                  //no effect on JLayedPane. Creates a background on a JPanel 
+                  //though.
+
+                  //theTop.setOpaque(true);
+
+                  //doesn't work here.
+                  somethingSelected = true;
+                  currentlySelected = myStack;
+                  currentlySelectedButton = theTop; // 
+                  validate();
+               }
+               return;
+}
+
+
+
+         /**
+          * This is clunkier than it should be because of
+          * architechtural failings. I need to link CardStacks with
+          * the arrays of JButtons they refer to. That way I wouldn't
+          * have to look stuff up and use ad hoc solutions.
+          *
+          * @param from
+          * @param to
+          */
+         private void makeMove(CardStack from, CardStack to,
+                               CardButton myTop, CardButton fromButton)
+         {
+            final boolean toWasNotOccupied;
+            final Card lastCardInToStack;
+            if (to.isOccupied())
+            {
+               toWasNotOccupied = false;
+               lastCardInToStack = to.peek();
+            }
+            else
+            {
+               toWasNotOccupied = true;
+               lastCardInToStack = null;
+            }
+            Card movedCard = from.pop();
+            to.push(movedCard);
+            if (DEBUGGING)
+            {
+               System.out.println(
+                       "makeMove: I haved move " + movedCard);
+            }
+            //UPDATE FROM STACK
+            final boolean fromIsOccupied = from.isOccupied();
+
+            //REMOVE CARD
+            if (!fromIsOccupied)
+            {
+               //The stack you're moving from has no cards left in it. Change CardButton.
+                if (DEBUGGING)
+                {
+                    System.out.println("makeMove: Removing a card from an empty stack.");
+                }
+                
+                setButtonSettings(fromButton); //?????
+               fromButton.setIcon(from.getDefaultImage());
+               fromButton.setBorder(null);
+               fromButton.setNoCard();
+               fromButton.invalidate(); // ?
+               //Chains up to the layout when I call validate.
+
+            }
+            else
+            {
+               //There are cards left in the current stack. It must be a PlayStack
+               //must also remove from PlayStackButtons array.
+               fromButton.setVisible(false); //Bingo! This works!
+               //Must remove from panel that it belongs to, not whole JFram:
+               playStackArea.remove(fromButton);
+               removeFromPlayStackButtons(movedCard);
+
+            }
+            //UPDATE TO STACK
+            if ((toWasNotOccupied) || to.isValidRemove() == false)
+            {//The second part only is true if the stack is currently empty OR it's an ace stack.
+               if (DEBUGGING)
+               {
+                  System.out.println(
+                          "makeMove:The stack I am moving to has nothing in it.");
+               }
+               
+              
+               
+               //setButtonSettings (myTop, movedCard); -- does NOT do any of these:
+               myTop.setCard(movedCard);
+               myTop.setIcon(RetrieveIcon.getIcon(movedCard)); 
+               myTop.setSelectedIcon(RetrieveIcon.getSelectedImage(movedCard));
+               myTop.setBorder(null); 
+               
+               //change icon only, don't need to add a button.
+            }
+            else
+            { //The to stack has been occupied previously. It must be a playstack.
+               //Add one button to the last card. Arg math.
+
+               final int playStackIndex = getIndexOfPlayStackButtons(
+                       lastCardInToStack);
+               if (DEBUGGING)
+               {
+                  System.out.println(
+                          "makeMove: Adding a card to a playStack whose last card is "
+                          + lastCardInToStack + ", and whose index is " + playStackIndex);
+               }
+               addButtonToThisPlayStack(movedCard, playStackIndex);
+            }
+
+         }
+
+
+       }
+ 
+ 
+ /** Problem: There is no means of changing myStack, even though the cards move around.
+  * Note: No, I don't think they move. I just add and remove them.
+  * Also, I need to associate these with the CardButtons, in a central manner.
+  * 
+  */
+ class NiftyTransferHandler extends TransferHandler {
+      // final String owner; //For debugging only
+       
+       final String stringRepJLabel = DataFlavor.javaJVMLocalObjectMimeType +
+   ";class=javax.swing.JLabel";
+  final DataFlavor mysteryFlavor;
+final CardStack myStack;
+        NiftyTransferHandler(String msg, CardStack myStack)
+        { super(msg);
+        this.myStack = myStack;
+        //this.owner = owner;
+        try {
+        mysteryFlavor = new DataFlavor(stringRepJLabel);
+        //System.out.println("The mystery flavor has correctly found the class.");
+            }
+            catch (ClassNotFoundException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+        }        
+        
+/**protected Transferable createTransferable(JComponent c)
+This is the key function that I needed to override --
+Creates a Transferable to use as the source for a data transfer.
+* Returns the representation of the data to be transferred, or null 
+* if the component's property is null
+         */
+@Override
+        protected Transferable createTransferable(JComponent source)
+        {JLabel aLabel;
+            if (source instanceof JLabel)
+            {
+                aLabel = (JLabel) source;
+                return new buttonTransferable(aLabel);
+            }
+            else return super.createTransferable(source);
+        }
+
+        
+        /** When dragging from A to B, B's importData function is activated
+         * 
+         * (When dragging from A to B, A's exportDone function is activated.)
+         * This only works from CardButton to CardButton. Otherwise it returns false.
+         * @param support
+         * @return 
+         */
+        @Override
+        public boolean importData(TransferHandler.TransferSupport support)
+        {
+            System.out.println("importData: entering function");
+            CardButton myTarget, sourceLabel;
+            if (support.getComponent() instanceof CardButton)
+                myTarget = (CardButton)support.getComponent();
+            else {
+                if (DEBUGGING)
+                    System.out.println("NTH.importData: Released drag on a non-CardButton.");
+                return false;
+            }
+            System.out.println("importData: past the first few lines.");
+            sourceLabel = null;
+            
+            if (hasMysteryFlavor(support.getDataFlavors()))
+            { 
+                try {
+            if (support.getTransferable().getTransferData(mysteryFlavor) instanceof
+                    CardButton )
+                sourceLabel = (CardButton) 
+                     support.getTransferable().getTransferData(mysteryFlavor);
+            else 
+            {  System.out.println("NTH.importData: My source label claims not to be a CardButton.");
+                return false;
+            }
+            
+                }
+                catch (IOException | UnsupportedFlavorException e)
+                 {  e.printStackTrace();
+                 System.out.println("Exception thrown.");
+                 return false;
+                }
+                
+              if (DEBUGGING) 
+                  System.out.println("importData: Trying to move "
+              + sourceLabel.getCard() +" to ");
+              if (myTarget.isCard) System.out.print(myTarget.getCard());
+              else System.out.print (" an ace or freecell stack.");
+              
+              //myMoveAids.singleClickOn(mySource, myStack);
+              if (sourceLabel == myTarget)
+              {
+                  myMoveAids.singleClickOn(sourceLabel, myStack);
+                  return false;
+              }                  
+//Well, you can drag to yourself
+              //Dragging to yourself is equivalent to selecting, if possible
+
+// if they do = each other, just deselect them both.
+              //Or wait. This immediately subsumes any clicks
+              
+              //OK. I know the sourceLabel is selectable.
+              //I have a CardButton. I want to know its stack.
+              //CardButtons can move around.
+              final boolean moveDone = 
+              myMoveAids.doMoveIfPossible(myTarget, myStack, stackBeingDragged, sourceLabel);
+              
+              stackBeingDragged = null;
+              //This code is where I have access to both JLabels. Right frickin' here.
+              //myTarget.setText("I've been dragged!");
+              //sourceLabel.setText("I've been dropped!");
+
+              return moveDone;
+              
+            }
+         if (DEBUGGING)
+         {
+             System.out.println("NTH.importData: my target does not contain the right data flavor.");
+             
+         }
+        return false;
+                    
+            
+        }
+        
+        
+        
+    private boolean hasMysteryFlavor(DataFlavor[] flavors) 
+    {
+        if (mysteryFlavor == null) {
+             return false;
+        }
+        for (int i = 0; i < flavors.length; i++) 
+            if (mysteryFlavor.equals(flavors[i])) 
+            { //System.out.println("Returning true from hasMysteryFlavor.");
+                return true;
+            }
+
+        return false;
+
+    }
+
+    /** You need to override this.
+     * 
+     * 
+     */
+    @Override
+        public boolean canImport(JComponent c, DataFlavor[] flavors) {
+            return hasMysteryFlavor(flavors);
+    }
+
+        
+          class buttonTransferable implements Transferable {
+//It has to be transferring icons too???????
+    protected final DataFlavor[] supportedFlavors = {
+        mysteryFlavor,
+            //,dragLabelFlavor
+    };
+    
+    JLabel myLabel;
+    
+    public buttonTransferable(JLabel aLabel)
+    {this.myLabel = aLabel;
+    }
+
+        @Override
+        public DataFlavor[] getTransferDataFlavors()
+        {
+            return supportedFlavors;
+        }
+
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor)
+        {
+        if ( flavor.equals(mysteryFlavor))
+           return true;
+        return false;
+        }
+        
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException
+        {  if (flavor.equals(mysteryFlavor))
+            return myLabel;
+          else
+            throw new UnsupportedFlavorException(flavor);
+        }
+        
+        
+        
+    }    
+    }
+ 
+   }
+   
+   
+   
+   
+   
+   /** I should add a CardStack to this, since I'm not actually move around anything.
+    * Plus, I need that for the transfer handler
+    * 
+    */
+   static private class CardButton extends JLabel
 {
 Card aCard;
 boolean isCard;
+Icon selectedImage;
+boolean selected;
+Icon standardIcon;
+CardStack myStack;
 
 
+public void setSelected(boolean value)
+{
+    if (selected == value)
+        return;
+    selected = value;
+    assert (!selectedImage.equals(standardIcon));
+    if (value && selectedImage != null)
+       this.setIcon(selectedImage);
+    if (!value)
+        this.setIcon(standardIcon);
+    if (DEBUGGING & !value)
+        System.out.println("CardButton.setSelected: Deselecting "+ aCard);
+    this.invalidate(); 
+    //Do I have to validate here?? Or invalidate??
+}
+
+/*Why am I overriding this??
+
+@Override
+public void setIcon(Icon anIcon)
+{
+    super.setIcon(anIcon);
+    
+}*/
 /**
  *  Should make this just take a card as an argument since I can just 
  * get the icon anyway. it'd save code.
  * @param icon
  * @param someCard 
  */
-CardButton(ImageIcon icon, Card someCard)
+CardButton(ImageIcon icon, Card someCard, CardStack myStack)
 { super(icon);
+//you can create an ImageIcon from an Image.
    aCard = new Card(someCard);
    isCard = true;
+   selectedImage = null;
+   selected =false;
+   this.myStack = myStack;
+   standardIcon = icon;
 }
 
-CardButton(ImageIcon icon)
+
+CardButton(ImageIcon icon, CardStack myStack)
 { super(icon);
+standardIcon = icon;
    isCard = false;
+   selectedImage = null;
+   selected = false;
+   this.myStack = myStack;
 }
 
+/** 
+ *  UNTESTED
+ * @return 
+ */
+CardStack getMyCardStack()
+{
+ return myStack;
+}
 boolean isCard ()
 { return isCard;}
         
@@ -1124,7 +1560,17 @@ boolean setNoCard()
    return true;
 }
 
+boolean setSelectedIcon (ImageIcon selectIcon)
+{
+ selectedImage = selectIcon;
+ return true;
 }
+
+}
+   
+       
+    
+    
    
    public static void main(String[] args)
    {
