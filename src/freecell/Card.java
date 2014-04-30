@@ -71,6 +71,18 @@ public class Card
       return mySuit;
    }
 
+   public boolean isRed()
+   {
+      if ((mySuit == Suit.HEARTS) || (mySuit == Suit.DIAMONDS))
+              return true;
+      else return false;
+   }
+   
+   public boolean isBlack()
+   {
+       return !isRed();
+   }
+   
    @Override
    public String toString()
    {

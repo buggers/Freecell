@@ -15,6 +15,28 @@ public enum CardValue
       this.myValue = myValue;
    }
 
+   /** UNTESTED
+    * 
+    * @return 
+    */
+   public CardValue getNext() {
+      return this.ordinal() < CardValue.values().length - 1
+          ? CardValue.values()[this.ordinal() + 1]
+          : null;
+    //Shamelessly taken from:
+    //  http://digitaljoel.nerd-herders.com/2011/04/05/get-the-next-value-in-a-java-enum/
+    }
+   
+   /** UNTESTED
+    * 
+    * @return 
+    */
+   public CardValue getPrevious() {
+      return this.ordinal() > 0  //Should it be > 1 ?
+          ? CardValue.values()[this.ordinal() - 1]
+          : null;
+      //Adapted from getNext
+    }
    /**
     * @return Value of the card. Stored as an int, so it's a deep
     * clone.
