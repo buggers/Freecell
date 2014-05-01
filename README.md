@@ -1,12 +1,8 @@
-Freecell. No frills. Not even a redeal button.
+Freecell. No frills yet. Written with Swing (works on PC and Mac).
 
 In honor of my dad -- this is the only computer game he'll play.
 
-Known bugs:
- * Card icons are clipped on the right hand side (top priority)
- * -Default onClickPressed flash animation still present.
- *  -Laggy, and controls aren't always predictable (needs better diagnosis before
-    this can be fixed)
+See the comments on Game.java for the latest bugs and version notes.
    
 Future features:
 * - Give user option to enable or disable auto moves to ace stacks
