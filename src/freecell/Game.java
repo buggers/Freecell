@@ -32,12 +32,13 @@ import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 
 /* 
-Current (v. 0.20)
+
 Known bugs:
- * Card icons are clipped on the right hand side (top priority)
- * -Default onClickPressed flash animation still present.
+* -Default onClickPressed flash animation still present.
 * - Laggy, and controls aren't always predictable (needs better diagnosis before
     this can be fixed)
+  -Dragging a card outside of the window is very slow
+  -Random crashes? Needs better diagnosis.
    
 * Future features:
 * - Give user option to enable or disable auto moves to ace stacks
@@ -52,13 +53,16 @@ itself to be invisible so it looks like you're moving it.
  * -Add testing. 
  * -Better graphics
  * -Card moving animation
-   -Selection is pale grey on a PC -- should be green.
    -Review JavaDocs
  
  * Possible future directions:
  * AI to solve all games (or declare them unwinnable)
  * Separate logging output for verbosity
  * Check if there are no possible moves or one possible move
+
+Finished  (v. 0.16a)
+* Added pixel to cardwidth -- seemes to fix the clipping issue
+* Changed card color slightly
 
 Finished:  (v. 0.16)
 * Fixed drag-and-drop-any-card bug, miscellaneous bugs
@@ -72,9 +76,6 @@ Finished: (v. 0.15)
  */
 public class Game
 {
-   final static Color niftyColor = new Color(0, 250, 100, 50); 
-  //20 alpha shows up fine on a Mac as green, too light on a PC.
-  //50 alpha shows up as grey on a PC but at least shows up.
    
    private interface CardStack
    {
@@ -1599,7 +1600,7 @@ void attemptSelection(CardStack myStack, CardButton mySource)
                   CardButton theTop = getTopButton(myStack.peek(),
                                                    mySource);
                   theTop.setSelected(true);
-                  theTop.setBackground(niftyColor);
+                  theTop.setBackground(RetrieveIcon.niftyColor);
                   //no effect on JLayedPane. Creates a background on a JPanel 
                   //though.
 

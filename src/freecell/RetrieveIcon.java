@@ -1,5 +1,6 @@
 package freecell;
 
+import java.awt.Color;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -28,10 +29,21 @@ private static final int NUMBER_OF_ICONS = 55; //for now, eventually an extra fo
 private static ImageIcon[] cardFronts = new ImageIcon[NUMBER_OF_ICONS];
 private static ImageIcon[] selectedCards = new ImageIcon[NUMBER_OF_ICONS];
 
-final public static int CLASS_IMAGE_WIDTH = 72;
+/**
+ *  Image width appears to be reported slightly differently on different machines.
+ * This should be the highest reported value.
+ * 
+ */
+final public static int CLASS_IMAGE_WIDTH = 73;
 final public static int CLASS_IMAGE_HEIGHT = 97;
 
 final public static int HEIGHT_OFFSET = 17;
+    /**(0, 250, 100, 50):
+     * 20 alpha shows up fine on a Mac as green, too light on a PC.
+     * 50 alpha shows up as grey on a PC but at least shows up.
+     * //new Color(100, 250, 100, 70); shows up as pale green on 
+     */
+    static final Color niftyColor = new Color(100, 250, 100, 70);
 
 public static int getImageHeight()
 { if (FOR_CLASS)
@@ -200,8 +212,9 @@ static private ImageIcon makeASelectedImage(Card aCard, String extension)
    //I can't waste more time on it.
    for (int i = newImage.getMinTileX(); i <newImage.getWidth(); i++)
       for (int y = newImage.getMinTileY(); y < newImage.getHeight(); y++)
-      {  if ( (( i+y) % 2) == 0 )
-           newImage.setRGB(i, y, Game.niftyColor.getRGB());
+      {  //if ( (( i+y) % 2) == 0 ) unnecessary
+           newImage.setRGB(i, y, niftyColor.getRGB());
+           
       }
    return new ImageIcon(newImage);
    
