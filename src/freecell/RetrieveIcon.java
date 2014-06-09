@@ -1,10 +1,12 @@
 package freecell;
 
+import freecell.Game.GameWindow.PlayStack;
 import java.awt.Color;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 
@@ -236,6 +238,20 @@ whizBang.setComposite(AlphaComposite.getInstance(AlphaComposite.DST_OVER,
 */
 
 }
+
+/** Helper function for DragClickListener.mousePressed
+* Makes a custom drag image based on the cards currently in the playstack
+*/
+static Image makeDragImage(PlayStack aStack, Card aCard)
+{
+   ArrayList<Card> draggedCards = aStack.getCardsUnder(aCard);
+//I need to do some clever Image work here.
+sdfljkl
+   throw new UnsupportedOperationException();
+}
+
+
+
 
 static public ImageIcon getSelectedImage(int cardcode)
 {

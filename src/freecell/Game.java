@@ -15,6 +15,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EmptyStackException;
 import java.util.List;
@@ -48,7 +49,7 @@ Known bugs:
 itself to be invisible so it looks like you're moving it.
      -Add deal button so you can replay if you have no moves left
      -(Don't auto-exit upon win.) This'd require nulling out/clearing a large
-     -amount of variables.
+     -amount of variables, so perhaps wait until most other development is done.
  * -Double clicking a playstack button moves it to a freecell
  * -Add testing. 
  * -Better graphics
@@ -91,7 +92,7 @@ public class Game
 
       Card pop();
 
-      Card push(Card aCard);
+      void push(Card aCard);
 
       ImageIcon getDefaultImage();
       /**
@@ -278,8 +279,10 @@ public class Game
        *
        *
        * @param aButton
+       * @param cardCode A negative number indicates not to use it. A positive number indicates
+       * that the button is a non-card but needs a special drag image.
        */
-      private void standardButtonSettings(CardButton aButton)
+      private void standardButtonSettings(CardButton aButton, int cardCode)
       {
          //Assumes you've already said aButton = new JButton(someIcon);
          
@@ -293,17 +296,24 @@ public class Game
          /*Can't be used on a JLabel:
          aButton.setFocusPainted(false);  //Bingo! This disables the stupid box.
          aButton.setBorderPainted(false);
-         //
+         
          */
          aButton.setOpaque(true);
          CardStack myStack = aButton.getMyCardStack();
+         
+         
          NiftyTransferHandler myHandler = new NiftyTransferHandler("icon", myStack);
-         
-         
-         ImageIcon dragImage = RetrieveIcon.getIcon(RetrieveIcon.JOKER);
-         
-       myHandler.setDragImage(dragImage.getImage());
-         
+         ImageIcon dragImage;
+       if (aButton.isCard())
+           dragImage = RetrieveIcon.getIcon(aButton.getCard());
+       else if (cardCode >= 0)
+       {
+           dragImage = RetrieveIcon.getIcon(cardCode);
+       }
+       else
+           dragImage = RetrieveIcon.getIcon(RetrieveIcon.JOKER);
+          myHandler.setDragImage(dragImage.getImage());
+     
          aButton.setTransferHandler(myHandler);
 
 
@@ -311,7 +321,7 @@ public class Game
 
       private void setButtonSettings(CardButton aButton, Card aCard)
       {
-         standardButtonSettings(aButton);
+         standardButtonSettings(aButton, -1);
 
 ///and here's where it get a bit dicey.
          aButton.setSelectedIcon(RetrieveIcon.getSelectedImage(aCard));
@@ -328,7 +338,7 @@ public class Game
        */
       private void setButtonSettings(CardButton aButton, int cardcode)
       {
-         standardButtonSettings(aButton);
+         standardButtonSettings(aButton, cardcode);
          aButton.setSelectedIcon(RetrieveIcon.getSelectedImage(
                  cardcode));
          
@@ -347,7 +357,7 @@ public class Game
        */
       private void setButtonSettings(CardButton aButton)
       {
-         standardButtonSettings(aButton);
+         standardButtonSettings(aButton, -1);
       }
 
       private void createLayout()
@@ -594,7 +604,7 @@ public class Game
       }
 
       @Override
-      public Card push(Card otherCard)
+      public void push(Card otherCard)
       {
          if (isOccupied)
          {
@@ -606,7 +616,7 @@ public class Game
          {
             aCard = new Card(otherCard);
             isOccupied = true;
-            return otherCard;
+            //return otherCard;
          }
 
       }
@@ -703,7 +713,7 @@ public class Game
        * invalid move
        */
       @Override
-      public Card push(Card aCard)
+      public void push(Card aCard)
       {
          if (!isValidAdd(aCard))
          {
@@ -711,7 +721,7 @@ public class Game
          }
          topCard = new Card(aCard);
          isStarted = true;
-         return aCard;
+         //return aCard;
       }
 
       @Override
@@ -749,9 +759,9 @@ public class Game
          return 0;
       }*/
    }
-
-   static public class PlayStack extends Stack<Card> implements CardStack
-   {
+//static public class PlayStack extends Stack<Card> implements CardStack
+static public class PlayStack extends ArrayDeque<Card> implements CardStack
+   { 
       public boolean isRed(Card someCard)
       {
          if ((someCard.getSuit() == Suit.DIAMONDS)
@@ -814,7 +824,7 @@ public class Game
       }
 
       @Override
-      public Card push(Card aCard)
+      public void push(Card aCard)
       {
          if (!isValidAdd(aCard))
          {
@@ -825,7 +835,7 @@ public class Game
          {
             super.push(aCard);
          }
-         return aCard;
+         //return aCard;
       }
 
       /**
@@ -839,7 +849,7 @@ public class Game
       @Override
       public boolean isSelectable()
       {
-         if (super.empty())
+         if (size() == 0)
          {
             return false;
          }
@@ -868,14 +878,14 @@ public class Game
 
       
       /**
-       * TOTALLY UNTESTED
+       * UNTESTED.
+       * Perhaps if I changed this class to implement a deque this'd be way easier.
        * 
        * @param aCard
        * @param maxReachableCardDepth
        * @return False if the card is not reachable OR if the card is not in the stack
        *
        */
-      //thePlayStack.isReachable(mySource.getCard(), maxMoveableCards)
       public boolean isReachable(Card aCard, int maxReachableCardDepth)
       {
           if (DEBUGGING)
@@ -927,6 +937,28 @@ public class Game
           
       }
       
+      /** Returns an array of cards, in sequential order, starting from aCard and going
+       * to the last card in the stack. Throws an exception if aCard is not in the stack
+       * Untested. Assumes the vector and stack are in the same order, which may not be true.
+       * For that reason, I need to change this class. However, 
+       * @param aCard
+       * @return 
+       */
+ public ArrayList<Card> getCardsUnder(Card aCard)
+{
+  ArrayList<Card> cardsUnder = new ArrayList<Card>();
+   boolean done = false;
+   //int index = this.indexOf(aCard);
+   //if (index == -1)
+   //    throw new IllegalArgumentException(aCard + " is not in this playstack.");
+   //for (int i = index; i < this.size(); i++)
+   //   cardsUnder.add(this.get(i));
+     lkjslkdfj 
+       
+   return cardsUnder;
+
+
+}
       /** UNTESTED (and unused)
        * 
        * 
@@ -984,10 +1016,9 @@ DragClickListener(CardStack myStack)
                 System.out.println("Class DragClickListener associated with something"
                          + "that's not a CardButton.");
              if (DEBUGGING)
-                 throw new RuntimeException();
+                 throw new ClassCastException();
              else return null; //Silent error
             }
-            //Or throw a checked class cast exception
       return mySource;
   }
 /**
@@ -1011,7 +1042,7 @@ DragClickListener(CardStack myStack)
         }
         
         /**
-         * This seems to kill mouseClicked.
+         * This usually prevents function mouseClicked from running.
          * 
          * @param e 
          */
@@ -1028,16 +1059,8 @@ DragClickListener(CardStack myStack)
              else 
                  System.out.println("DragClickListener.mousepressed: On a Freecell or Acestack.");
             }
-            
-            if (mySource == null)
-                throw new NullPointerException("mySource is null");
-            if (e == null)
-                throw new NullPointerException("E is null");
-            if (handler == null)
-                throw new NullPointerException("Handler is null");
 
 //Don't drag if something's already been selected
-            
 if (somethingSelected)
 {
     if (DEBUGGING)
@@ -1070,7 +1093,9 @@ return;
             //max number of moveable cards, and then returns true if it's reachable and false
             //if not.
             if (thePlayStack.isReachable(mySource.getCard(), maxMoveableCards))
+            {   handler.setDragImage( RetrieveIcon.makeDragImage(thePlayStack,mySource.getCard()));
                 handler.exportAsDrag(mySource, e, TransferHandler.COPY);
+            }
             
         }
        }
@@ -1698,7 +1723,12 @@ private int maxCardsInMoveableStack()
                myTop.setCard(movedCard);
                myTop.setIcon(RetrieveIcon.getIcon(movedCard)); 
                myTop.setSelectedIcon(RetrieveIcon.getSelectedImage(movedCard));
-               myTop.setBorder(null); 
+               myTop.setBorder(null);
+               myTop.getTransferHandler().setDragImage(
+               RetrieveIcon.getIcon(movedCard).getImage()
+               );
+               
+               
                myTop.invalidate();
                //change icon only, don't need to add a button.
             }
