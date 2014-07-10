@@ -3,6 +3,7 @@ Freecell. No frills yet. Written with Swing (works on PC and Mac).
 In honor of my dad -- this is the only computer game he'll play.
 
 See the comments on Game.java for the latest bugs and version notes.
+The latest commit is non-functional (I was transferring computers and needed to quickly save what I had) -- the one before that works fine.
    
 Future features:
 * - Give user option to enable or disable auto moves to ace stacks
